@@ -72,8 +72,39 @@ export default function RegisterPage() {
         return;
       }
 
-      toast.success("Account created! Please check your email for the verification link.");
-      router.push(`/verify-email?status=pending&email=${encodeURIComponent(email.trim())}`);
+      // If Supabase returned an active session directly
+      if (data.session) {
+        toast.success("Account created successfully! Welcome to Truck Tracking Master.");
+        router.push(isSuperAdmin ? "/admin" : "/dashboard");
+        router.refresh();
+        return;
+      }
+
+      // Attempt auto-confirm & immediate sign in
+      try {
+        await fetch("/api/auth/auto-confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email.trim() }),
+        });
+      } catch {
+        // ignore
+      }
+
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (!signInError && signInData?.session) {
+        toast.success("Account created successfully! Welcome to Truck Tracking Master.");
+        router.push(isSuperAdmin ? "/admin" : "/dashboard");
+        router.refresh();
+        return;
+      }
+
+      toast.success("Account created! You can now log in with your email and password.");
+      router.push(`/login?email=${encodeURIComponent(email.trim())}`);
     } catch {
       toast.error("An unexpected error occurred during registration. Please try again.");
     } finally {

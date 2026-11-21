@@ -7,12 +7,6 @@ export default async function ProtectedLayout({ children }: { children: React.Re
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  // Mandatory server-side check for verified email
-  const isEmailVerified = Boolean(user.email_confirmed_at || user.confirmed_at);
-  if (!isEmailVerified) {
-    redirect(`/login?error=unverified&email=${encodeURIComponent(user.email || "")}`);
-  }
-
   let profile = await getCurrentProfile(user.id);
 
   // If user is designated admin, ensure admin role is honored

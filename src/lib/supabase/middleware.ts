@@ -80,29 +80,16 @@ export async function updateSession(request: NextRequest) {
         url.searchParams.set("redirect", pathname);
         return NextResponse.redirect(url);
       }
-
-      // Mandatory email verification check
-      const isEmailVerified = Boolean(user.email_confirmed_at || user.confirmed_at);
-      if (!isEmailVerified) {
-        const url = request.nextUrl.clone();
-        url.pathname = "/login";
-        url.searchParams.set("error", "unverified");
-        url.searchParams.set("email", user.email || "");
-        return NextResponse.redirect(url);
-      }
     }
 
-    // Redirect verified logged-in users away from auth pages
+    // Redirect authenticated users away from auth pages
     if (isAuthPage && user) {
-      const isEmailVerified = Boolean(user.email_confirmed_at || user.confirmed_at);
-      if (isEmailVerified) {
-        const isSuperAdmin = Boolean(
-          user.email && ADMIN_EMAILS.includes(user.email.toLowerCase())
-        );
-        const url = request.nextUrl.clone();
-        url.pathname = isSuperAdmin && isAdminLogin ? "/admin" : "/dashboard";
-        return NextResponse.redirect(url);
-      }
+      const isSuperAdmin = Boolean(
+        user.email && ADMIN_EMAILS.includes(user.email.toLowerCase())
+      );
+      const url = request.nextUrl.clone();
+      url.pathname = isSuperAdmin && isAdminLogin ? "/admin" : "/dashboard";
+      return NextResponse.redirect(url);
     }
   } catch (err) {
     console.error("[Middleware updateSession caught error]", err);

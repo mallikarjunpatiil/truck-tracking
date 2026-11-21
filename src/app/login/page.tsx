@@ -32,96 +32,13 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [resending, setResending] = useState(false);
-  const [countdown, setCountdown] = useState(0);
-  const [isUnverified, setIsUnverified] = useState(errorParam === "unverified");
   const [resolvedEmail, setResolvedEmail] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const router = useRouter();
 
-  // Cooldown timer management with localStorage
-  useEffect(() => {
-    const targetEmail = resolvedEmail || (identifier.includes("@") ? identifier.trim() : "");
-    if (!targetEmail) return;
-    const key = `resend_cooldown_${targetEmail.toLowerCase().trim()}`;
-    const saved = localStorage.getItem(key);
-    if (saved) {
-      const diff = Math.ceil((parseInt(saved, 10) - Date.now()) / 1000);
-      if (diff > 0) {
-        setCountdown(diff);
-      } else {
-        localStorage.removeItem(key);
-      }
-    }
-  }, [identifier, resolvedEmail]);
-
-  useEffect(() => {
-    if (countdown <= 0) return;
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          const targetEmail = resolvedEmail || (identifier.includes("@") ? identifier.trim() : "");
-          if (targetEmail) localStorage.removeItem(`resend_cooldown_${targetEmail.toLowerCase().trim()}`);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [countdown, identifier, resolvedEmail]);
-
-  const handleResendVerification = async () => {
-    const targetEmail = (resolvedEmail || (identifier.includes("@") ? identifier.trim() : "")).trim();
-    if (!targetEmail) {
-      toast.error("Please enter your registered email address to resend verification link");
-      return;
-    }
-
-    if (countdown > 0) {
-      toast.info(`Please wait ${countdown} seconds before requesting another email`);
-      return;
-    }
-
-    setResending(true);
-    try {
-      const supabase = createClient();
-      const redirectOrigin =
-        typeof window !== "undefined" && window.location.origin
-          ? window.location.origin
-          : "https://truck-tracking-zmfb.vercel.app";
-
-      const { error } = await supabase.auth.resend({
-        type: "signup",
-        email: targetEmail,
-        options: {
-          emailRedirectTo: `${redirectOrigin}/auth/callback`,
-        },
-      });
-
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
-
-      toast.success("Verification email resent! Please check your inbox.");
-      const cooldownSecs = 60;
-      setCountdown(cooldownSecs);
-      localStorage.setItem(
-        `resend_cooldown_${targetEmail.toLowerCase()}`,
-        (Date.now() + cooldownSecs * 1000).toString()
-      );
-    } catch {
-      toast.error("Failed to resend verification email. Please try again.");
-    } finally {
-      setResending(false);
-    }
-  };
-
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
-    setIsUnverified(false);
 
     const validation = userLoginSchema.safeParse({ identifier, password });
     if (!validation.success) {
@@ -165,38 +82,51 @@ function LoginForm() {
 
       // Authenticate with Supabase Auth
       const supabase = createClient();
-      const { data, error } = await supabase.auth.signInWithPassword({
+      let { data, error } = await supabase.auth.signInWithPassword({
         email: targetEmail,
         password,
       });
 
-      if (error) {
-        const errorMsg = error.message.toLowerCase();
-        if (
-          errorMsg.includes("email not confirmed") ||
-          errorMsg.includes("email not verified") ||
-          errorMsg.includes("unconfirmed") ||
-          (error as unknown as { code?: string }).code === "email_not_confirmed"
-        ) {
-          setIsUnverified(true);
-          setResolvedEmail(targetEmail);
-          return;
+      // If Supabase returned unconfirmed, attempt auto-confirm and retry
+      if (
+        error &&
+        (error.message.toLowerCase().includes("email not confirmed") ||
+          error.message.toLowerCase().includes("unconfirmed") ||
+          (error as unknown as { code?: string }).code === "email_not_confirmed")
+      ) {
+        try {
+          const autoRes = await fetch("/api/auth/auto-confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: targetEmail }),
+          });
+          const autoData = await autoRes.json();
+          if (autoData.confirmed) {
+            const retry = await supabase.auth.signInWithPassword({
+              email: targetEmail,
+              password,
+            });
+            data = retry.data;
+            error = retry.error;
+          }
+        } catch {
+          // ignore
         }
+      }
 
+      if (error) {
         toast.error(error.message);
+        setLoading(false);
         return;
       }
 
-      // Check if user session exists but email is not confirmed
+      if (!data?.user) {
+        toast.error("Sign in failed. Please check your credentials.");
+        setLoading(false);
+        return;
+      }
+
       const user = data.user;
-      const isEmailVerified = Boolean(user?.email_confirmed_at || user?.confirmed_at);
-
-      if (!isEmailVerified) {
-        await supabase.auth.signOut();
-        setIsUnverified(true);
-        setResolvedEmail(targetEmail);
-        return;
-      }
 
       // Double-check profile is_active
       const { data: profile } = await supabase
@@ -309,35 +239,6 @@ function LoginForm() {
                 <p className="text-xs text-emerald-700 mt-0.5">
                   Your email has been successfully verified. You can now log in.
                 </p>
-              </div>
-            </div>
-          )}
-
-          {/* WARNING BANNER: Unverified user */}
-          {isUnverified && (
-            <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-300 shadow-sm">
-              <div className="flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="text-sm font-bold text-amber-900">Email Verification Required</p>
-                  <p className="text-xs text-amber-800 mt-1 leading-relaxed">
-                    Your email is not verified. Please check your inbox and verify your email.
-                  </p>
-                  
-                  <div className="mt-3">
-                    <button
-                      type="button"
-                      onClick={handleResendVerification}
-                      disabled={resending || countdown > 0}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700
-                                 text-white text-xs font-semibold shadow-sm transition-colors duration-150
-                                 disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${resending ? "animate-spin" : ""}`} />
-                      {countdown > 0 ? `Resend in ${countdown}s` : "Resend Verification Email"}
-                    </button>
-                  </div>
-                </div>
               </div>
             </div>
           )}
