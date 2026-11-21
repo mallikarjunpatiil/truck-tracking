@@ -36,7 +36,16 @@ function VerifyEmailContent() {
     (window.location.hash.includes("error=access_denied") ||
       window.location.hash.includes("error_description="));
 
+  const isPkceCrossDeviceError = Boolean(
+    errorParam &&
+      (errorParam.toLowerCase().includes("code verifier") ||
+        errorParam.toLowerCase().includes("code_verifier") ||
+        errorParam.toLowerCase().includes("different browser or device") ||
+        errorParam.toLowerCase().includes("storage was cleared"))
+  );
+
   const [status, setStatus] = useState<"pending" | "verifying" | "success" | "expired">(() => {
+    if (isPkceCrossDeviceError) return "success";
     if (hasErrorInHash || errorParam) return "expired";
     if (hasAccessTokenInHash) return "verifying";
     if (initialStatusParam === "success") return "success";
@@ -77,18 +86,34 @@ function VerifyEmailContent() {
       }
     });
 
-    // 3. Inspect hash parameters for errors
+    // 3. Inspect hash parameters for errors or cross-device verifier status
     if (typeof window !== "undefined") {
       const hash = window.location.hash;
-      if (hash.includes("error_description=")) {
+      if (
+        hash.includes("code_verifier") ||
+        hash.includes("different+browser") ||
+        hash.includes("different%20browser")
+      ) {
+        setStatus("success");
+      } else if (hash.includes("error_description=")) {
         try {
           const params = new URLSearchParams(hash.substring(1));
           const desc = params.get("error_description");
-          if (desc) setErrorMessage(decodeURIComponent(desc.replace(/\+/g, " ")));
+          if (desc) {
+            const decoded = decodeURIComponent(desc.replace(/\+/g, " "));
+            if (
+              decoded.toLowerCase().includes("code verifier") ||
+              decoded.toLowerCase().includes("different browser")
+            ) {
+              setStatus("success");
+            } else {
+              setErrorMessage(decoded);
+              setStatus("expired");
+            }
+          }
         } catch {
           // fallback
         }
-        setStatus("expired");
       }
     }
 
@@ -263,7 +288,12 @@ function VerifyEmailContent() {
               </div>
               <h2 className="text-2xl font-bold text-navy-900 mb-2">Email Verified Successfully</h2>
               <div className="text-emerald-700 bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-sm font-medium mb-6 leading-relaxed">
-                Your email has been successfully verified. You can now log in.
+                Your email has been successfully verified! You can now log in.
+                {isPkceCrossDeviceError && (
+                  <p className="text-xs text-emerald-800 mt-2 font-normal leading-relaxed">
+                    Because this link was opened on a mobile device or separate browser from where you registered, please enter your password to sign in.
+                  </p>
+                )}
                 {email && (
                   <div className="text-xs text-emerald-800 font-mono mt-1">
                     Account: {email}

@@ -31,6 +31,15 @@ export async function GET(request: NextRequest) {
     // 1. If Supabase Auth redirected with an error query param
     if (errorParam || errorDesc) {
       const message = errorDesc || errorParam || "Verification failed";
+      const isPkceStorage =
+        message.toLowerCase().includes("code verifier") ||
+        message.toLowerCase().includes("code_verifier") ||
+        message.toLowerCase().includes("different browser or device");
+
+      if (isPkceStorage) {
+        return NextResponse.redirect(new URL("/login?verified=true", origin));
+      }
+
       return NextResponse.redirect(
         new URL(`/verify-email?status=expired&error=${encodeURIComponent(message)}`, origin)
       );
@@ -67,6 +76,19 @@ export async function GET(request: NextRequest) {
       const { data: { user } } = await supabase.auth.getUser();
       if (user?.email_confirmed_at || user?.confirmed_at) {
         return successResponse;
+      }
+
+      const errMsg = (error.message || "").toLowerCase();
+      const isPkceStorageError =
+        errMsg.includes("code verifier") ||
+        errMsg.includes("code_verifier") ||
+        errMsg.includes("storage") ||
+        errMsg.includes("different browser or device");
+
+      if (isPkceStorageError) {
+        // The email verification on Supabase backend has already been executed.
+        // Auto-session couldn't be established on this device because it was opened on a phone or different browser.
+        return NextResponse.redirect(new URL("/login?verified=true", origin));
       }
 
       console.warn("[Auth Callback] PKCE exchange error:", error.message);
