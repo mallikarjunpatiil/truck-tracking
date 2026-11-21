@@ -2,25 +2,37 @@
 
 import { useEffect, useState } from "react";
 import { Users, FileSpreadsheet, TrendingUp, Shield } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 
 export function AdminStats() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ vehicles: 0, users: 0, batches: 0, admins: 0 });
 
   useEffect(() => {
+    let isMounted = true;
     async function load() {
-      const supabase = createClient();
-      const [v, u, b, a] = await Promise.all([
-        supabase.from("vehicles").select("*", { count: "exact", head: true }),
-        supabase.from("profiles").select("*", { count: "exact", head: true }),
-        supabase.from("upload_batches").select("*", { count: "exact", head: true }),
-        supabase.from("profiles").select("*", { count: "exact", head: true }).eq("role", "admin"),
-      ]);
-      setStats({ vehicles: v.count || 0, users: u.count || 0, batches: b.count || 0, admins: a.count || 0 });
-      setLoading(false);
+      try {
+        const res = await fetch("/api/admin/stats");
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) {
+            setStats({
+              vehicles: data.vehicles || 0,
+              users: data.users || 0,
+              batches: data.batches || 0,
+              admins: data.admins || 0,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("Stats fetch notice:", err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
     }
     load();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const items = [
@@ -33,7 +45,7 @@ export function AdminStats() {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       {items.map((item) => (
-        <div key={item.label} className="enterprise-card p-5">
+        <div key={item.label} className="enterprise-card p-5 border border-navy-200/80 shadow-sm">
           {loading ? (
             <div className="space-y-3">
               <div className="h-4 w-20 rounded bg-navy-100 animate-pulse" />
@@ -46,7 +58,7 @@ export function AdminStats() {
                 <p className="text-2xl font-bold text-navy-900 mt-1">{item.value.toLocaleString()}</p>
                 {"sub" in item && item.sub && <p className="text-xs text-navy-400 mt-0.5">{item.sub}</p>}
               </div>
-              <div className={`w-10 h-10 rounded-lg ${item.bg} flex items-center justify-center shrink-0`}>
+              <div className={`w-10 h-10 rounded-xl ${item.bg} flex items-center justify-center shrink-0`}>
                 <item.icon className={`w-5 h-5 ${item.color}`} />
               </div>
             </div>

@@ -5,7 +5,7 @@ import { cache } from "react";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://cbawyuzqhxfqoyjhwpnc.supabase.co";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_qy_8m0bDYR9Kg9Gl_ZA99Q_AStcBwUO";
 
-export async function createServerSupabaseClient() {
+export const createServerSupabaseClient = cache(async () => {
   const cookieStore = await cookies();
 
   return createServerClient(
@@ -28,7 +28,7 @@ export async function createServerSupabaseClient() {
       },
     }
   );
-}
+});
 
 // React cache() deduplicates calls within the same request lifecycle
 export const getCurrentUser = cache(async () => {
@@ -49,14 +49,17 @@ export const getCurrentProfile = cache(async (userId: string) => {
 
 export async function createServiceRoleClient() {
   const { createClient } = await import("@supabase/supabase-js");
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    }
-  );
+  const serviceKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY &&
+    !process.env.SUPABASE_SERVICE_ROLE_KEY.includes("your-") &&
+    !process.env.SUPABASE_SERVICE_ROLE_KEY.includes("placeholder")
+      ? process.env.SUPABASE_SERVICE_ROLE_KEY
+      : SUPABASE_ANON_KEY;
+
+  return createClient(SUPABASE_URL, serviceKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
 }
