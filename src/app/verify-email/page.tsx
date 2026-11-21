@@ -3,38 +3,98 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Truck, Mail, CheckCircle2, AlertTriangle, ArrowLeft, RefreshCw, Shield, ArrowRight } from "lucide-react";
+import {
+  Truck,
+  Mail,
+  CheckCircle2,
+  AlertTriangle,
+  ArrowLeft,
+  RefreshCw,
+  Shield,
+  ArrowRight,
+  Loader2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams();
-  const initialStatus = searchParams.get("status") || "pending";
+  const initialStatusParam = searchParams.get("status");
   const initialEmail = searchParams.get("email") || "";
+  const errorParam = searchParams.get("error") || searchParams.get("error_description") || "";
 
-  const [status, setStatus] = useState<"pending" | "success" | "expired">(
-    initialStatus as "pending" | "success" | "expired"
-  );
+  // Check if hash has access_token or errors initially
+  const hasAccessTokenInHash =
+    typeof window !== "undefined" &&
+    (window.location.hash.includes("access_token=") ||
+      window.location.hash.includes("type=signup") ||
+      window.location.hash.includes("type=recovery"));
+
+  const hasErrorInHash =
+    typeof window !== "undefined" &&
+    (window.location.hash.includes("error=access_denied") ||
+      window.location.hash.includes("error_description="));
+
+  const [status, setStatus] = useState<"pending" | "verifying" | "success" | "expired">(() => {
+    if (hasErrorInHash || errorParam) return "expired";
+    if (hasAccessTokenInHash) return "verifying";
+    if (initialStatusParam === "success") return "success";
+    if (initialStatusParam === "expired") return "expired";
+    return "pending";
+  });
+
+  const [errorMessage, setErrorMessage] = useState<string>(errorParam);
   const [email, setEmail] = useState(initialEmail);
   const [resending, setResending] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
-  // Check client-side URL hash for Supabase auth redirects
+  // Monitor Supabase Auth changes and hash tokens
   useEffect(() => {
+    const supabase = createClient();
+
+    // 1. Listen for auth state transitions (fires when Supabase client processes hash tokens)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (
+        event === "SIGNED_IN" ||
+        event === "USER_UPDATED" ||
+        event === "INITIAL_SESSION"
+      ) {
+        if (session?.user) {
+          setStatus("success");
+          if (session.user.email) setEmail(session.user.email);
+        }
+      }
+    });
+
+    // 2. Check active session or user
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setStatus("success");
+        if (session.user.email) setEmail(session.user.email);
+      }
+    });
+
+    // 3. Inspect hash parameters for errors
     if (typeof window !== "undefined") {
       const hash = window.location.hash;
-      if (hash.includes("error=access_denied") || hash.includes("error_description")) {
+      if (hash.includes("error_description=")) {
+        try {
+          const params = new URLSearchParams(hash.substring(1));
+          const desc = params.get("error_description");
+          if (desc) setErrorMessage(decodeURIComponent(desc.replace(/\+/g, " ")));
+        } catch {
+          // fallback
+        }
         setStatus("expired");
-      } else if (hash.includes("access_token=") || hash.includes("type=signup") || hash.includes("type=recovery")) {
-        const supabase = createClient();
-        supabase.auth.getUser().then(({ data: { user } }) => {
-          if (user?.email_confirmed_at || user?.confirmed_at) {
-            setStatus("success");
-          }
-        });
       }
     }
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Cooldown timer management with localStorage persistence
@@ -81,15 +141,26 @@ function VerifyEmailContent() {
     setResending(true);
     try {
       const supabase = createClient();
+      const redirectOrigin =
+        typeof window !== "undefined" && window.location.origin
+          ? window.location.origin
+          : "https://truck-tracking-zmfb.vercel.app";
+
       const { error } = await supabase.auth.resend({
         type: "signup",
-        email,
+        email: email.trim(),
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${redirectOrigin}/auth/callback`,
         },
       });
 
       if (error) {
+        const lower = error.message.toLowerCase();
+        if (lower.includes("already confirmed") || lower.includes("already verified")) {
+          toast.success("This email is already verified! You can sign in now.");
+          setStatus("success");
+          return;
+        }
         toast.error(error.message);
         return;
       }
@@ -97,7 +168,10 @@ function VerifyEmailContent() {
       toast.success("Verification email resent successfully! Please check your inbox.");
       const cooldownSecs = 60;
       setCountdown(cooldownSecs);
-      localStorage.setItem(`resend_cooldown_${email.toLowerCase()}`, (Date.now() + cooldownSecs * 1000).toString());
+      localStorage.setItem(
+        `resend_cooldown_${email.toLowerCase().trim()}`,
+        (Date.now() + cooldownSecs * 1000).toString()
+      );
     } catch {
       toast.error("Failed to resend verification email. Please try again.");
     } finally {
@@ -168,6 +242,19 @@ function VerifyEmailContent() {
             </div>
           </div>
 
+          {/* STATUS: VERIFYING (Temporary state while processing token or exchange) */}
+          {status === "verifying" && (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto mb-6">
+                <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+              </div>
+              <h2 className="text-2xl font-bold text-navy-900 mb-2">Verifying Email...</h2>
+              <p className="text-navy-500 text-sm leading-relaxed">
+                Please wait while we validate your security credentials and confirm your account.
+              </p>
+            </div>
+          )}
+
           {/* STATUS: SUCCESS */}
           {status === "success" && (
             <div>
@@ -175,9 +262,14 @@ function VerifyEmailContent() {
                 <CheckCircle2 className="w-8 h-8 text-emerald-600" />
               </div>
               <h2 className="text-2xl font-bold text-navy-900 mb-2">Email Verified Successfully</h2>
-              <p className="text-emerald-700 bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-sm font-medium mb-6 leading-relaxed">
+              <div className="text-emerald-700 bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-sm font-medium mb-6 leading-relaxed">
                 Your email has been successfully verified. You can now log in.
-              </p>
+                {email && (
+                  <div className="text-xs text-emerald-800 font-mono mt-1">
+                    Account: {email}
+                  </div>
+                )}
+              </div>
               <p className="text-navy-500 text-sm mb-8 leading-relaxed">
                 Your credentials and security permissions are now activated. Proceed to the sign-in screen to access your dashboard.
               </p>
@@ -191,7 +283,7 @@ function VerifyEmailContent() {
             </div>
           )}
 
-          {/* STATUS: PENDING (Default after signup or unverified attempt) */}
+          {/* STATUS: PENDING (Default after signup) */}
           {status === "pending" && (
             <div>
               <div className="w-16 h-16 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center mb-6">
@@ -199,7 +291,7 @@ function VerifyEmailContent() {
               </div>
 
               <h2 className="text-2xl font-bold text-navy-900 mb-2">Check Your Email</h2>
-              
+
               <div className="p-4 rounded-xl bg-blue-50/80 border border-blue-200 mb-6">
                 <p className="text-sm font-medium text-navy-800 leading-relaxed">
                   Registration successful! Please check your email and verify your account before logging in.
@@ -212,7 +304,7 @@ function VerifyEmailContent() {
               </div>
 
               <p className="text-navy-500 text-xs mb-6 leading-relaxed">
-                Click the confirmation link sent to your inbox to activate your account. If you do not see the email, please check your junk or spam folder.
+                Click the confirmation link sent to your inbox to activate your account. If you do not see the email, please check your spam or junk folder.
               </p>
 
               <div className="space-y-3">
@@ -244,14 +336,17 @@ function VerifyEmailContent() {
               </div>
 
               <h2 className="text-2xl font-bold text-navy-900 mb-2">Verification Link Expired</h2>
-              
+
               <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800 mb-6 leading-relaxed">
-                This verification link is invalid or has expired. For security, verification tokens expire after 24 hours.
+                {errorMessage ||
+                  "This verification link is invalid or has expired. For security, verification tokens expire after a limited period."}
               </div>
 
               <div className="space-y-4 mb-6">
                 <div>
-                  <label htmlFor="resendEmail" className="enterprise-label">Email Address</label>
+                  <label htmlFor="resendEmail" className="enterprise-label">
+                    Email Address
+                  </label>
                   <input
                     id="resendEmail"
                     type="email"
@@ -296,7 +391,13 @@ function VerifyEmailContent() {
 
 export default function VerifyEmailPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-white"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-navy-900"></div></div>}>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-white">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-navy-900"></div>
+        </div>
+      }
+    >
       <VerifyEmailContent />
     </Suspense>
   );

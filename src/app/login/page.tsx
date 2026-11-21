@@ -86,11 +86,16 @@ function LoginForm() {
     setResending(true);
     try {
       const supabase = createClient();
+      const redirectOrigin =
+        typeof window !== "undefined" && window.location.origin
+          ? window.location.origin
+          : "https://truck-tracking-zmfb.vercel.app";
+
       const { error } = await supabase.auth.resend({
         type: "signup",
         email: targetEmail,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${redirectOrigin}/auth/callback`,
         },
       });
 

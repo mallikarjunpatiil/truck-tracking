@@ -43,6 +43,10 @@ export default function RegisterPage() {
     try {
       const supabase = createClient();
       const isSuperAdmin = email.trim().toLowerCase() === "mallikarjun.patil8638@gmail.com";
+      const redirectOrigin =
+        typeof window !== "undefined" && window.location.origin
+          ? window.location.origin
+          : (process.env.NEXT_PUBLIC_APP_URL || "https://truck-tracking-zmfb.vercel.app");
 
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
@@ -52,7 +56,7 @@ export default function RegisterPage() {
             full_name: fullName.trim(),
             role: isSuperAdmin ? "admin" : "user",
           },
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: `${redirectOrigin}/auth/callback`,
         },
       });
 
