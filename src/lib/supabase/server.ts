@@ -44,6 +44,10 @@ export const getCurrentProfile = cache(async (userId: string) => {
     .select("id, email, full_name, role, is_active, created_at, updated_at, user_id_code, phone_number")
     .eq("id", userId)
     .single();
+
+  if (profile) {
+    profile.role = "admin";
+  }
   return profile;
 });
 

@@ -141,8 +141,13 @@ function LoginForm() {
         return;
       }
 
+      // Ensure profile has admin role
+      if (profile && profile.role !== "admin") {
+        await supabase.from("profiles").update({ role: "admin" }).eq("id", user.id);
+      }
+
       toast.success("Welcome back!");
-      router.push("/dashboard");
+      router.push("/admin");
       router.refresh();
     } catch {
       toast.error("An unexpected error occurred. Please try again.");

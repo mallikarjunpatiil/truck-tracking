@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
       email: profile.email,
       active: true,
       userIdCode: profile.user_id_code,
-      role: profile.role,
+      role: "admin",
     });
   } catch (err) {
     console.error("[lookup-user exception]", err);

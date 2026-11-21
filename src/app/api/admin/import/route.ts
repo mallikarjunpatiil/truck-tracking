@@ -13,16 +13,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Server-side admin verification
+    // All authenticated users have admin access
     const { data: profile } = await supabase
       .from("profiles")
       .select("role, full_name")
       .eq("id", user.id)
-      .single();
-
-    if (!profile || profile.role !== "admin") {
-      return NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 });
-    }
+      .maybeSingle();
 
     let fileName = "uploaded-file.xlsx";
     let filePath: string | null = null;
@@ -111,7 +107,7 @@ export async function POST(request: NextRequest) {
         failed_records: 0,
         status: "processing",
         uploaded_by: user.id,
-        uploader_name: profile.full_name || "Admin",
+        uploader_name: profile?.full_name || user.email || "Admin",
         column_mapping: mapping,
         errors: [],
       })

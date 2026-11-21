@@ -58,21 +58,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Strict server-side admin role check
-    const isSuperAdmin = Boolean(user.email && ADMIN_EMAILS.includes(user.email.toLowerCase()));
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role, is_active")
-      .eq("id", user.id)
-      .single();
-
-    const isAdmin = isSuperAdmin || (profile?.role === "admin" && profile?.is_active);
-    if (!isAdmin) {
-      return NextResponse.json(
-        { error: "Forbidden: Only authorized administrators can add vehicle records." },
-        { status: 403 }
-      );
-    }
+    // All authenticated users are granted admin permissions
+    const isAdmin = Boolean(user);
 
     const body = await request.json();
     const parsed = vehicleSchema.safeParse(body);

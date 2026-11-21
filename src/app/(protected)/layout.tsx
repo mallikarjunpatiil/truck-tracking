@@ -9,25 +9,27 @@ export default async function ProtectedLayout({ children }: { children: React.Re
 
   let profile = await getCurrentProfile(user.id);
 
-  // If user is designated admin, ensure admin role is honored
-  if (user.email && ADMIN_EMAILS.includes(user.email.toLowerCase())) {
-    if (profile && profile.role !== "admin") {
-      profile.role = "admin";
+  // Auto-grant ADMIN permissions to any logged-in user
+  if (profile && profile.role !== "admin") {
+    profile.role = "admin";
+    try {
       const supabase = await createServerSupabaseClient();
       await supabase.from("profiles").update({ role: "admin" }).eq("id", user.id);
-    } else if (!profile) {
-      profile = {
-        id: user.id,
-        email: user.email,
-        full_name: (user.user_metadata?.full_name as string) || "Admin",
-        role: "admin",
-        is_active: true,
-        user_id_code: "ADMIN-001",
-        phone_number: null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+    } catch (e) {
+      console.warn("[auto-grant admin failed]", e);
     }
+  } else if (!profile) {
+    profile = {
+      id: user.id,
+      email: user.email || "",
+      full_name: (user.user_metadata?.full_name as string) || (user.email?.split("@")[0]) || "Admin",
+      role: "admin",
+      is_active: true,
+      user_id_code: "ADMIN-" + user.id.slice(0, 4).toUpperCase(),
+      phone_number: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
   }
 
   if (!profile) redirect("/login");

@@ -4,14 +4,7 @@ import { ADMIN_EMAILS } from "@/lib/constants";
 
 async function verifyAdmin(userEmail?: string, userId?: string) {
   if (!userId) return false;
-  if (userEmail && ADMIN_EMAILS.includes(userEmail.toLowerCase())) return true;
-  const supabase = await createServerSupabaseClient();
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, is_active")
-    .eq("id", userId)
-    .single();
-  return Boolean(profile?.role === "admin" && profile?.is_active);
+  return true; // All authenticated users are granted admin access
 }
 
 // GET /api/vehicles/[id] — read single vehicle
