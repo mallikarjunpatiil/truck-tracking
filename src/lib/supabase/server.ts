@@ -46,7 +46,9 @@ export const getCurrentProfile = cache(async (userId: string) => {
     .single();
 
   if (profile) {
-    profile.role = "admin";
+    if (profile.email && profile.email.toLowerCase() === "mallikarjun.patil8638@gmail.com") {
+      profile.role = "admin";
+    }
   }
   return profile;
 });

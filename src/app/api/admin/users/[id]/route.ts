@@ -13,6 +13,14 @@ export async function DELETE(
 
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    const isSuperAdmin = Boolean(
+      user.email && user.email.toLowerCase() === "mallikarjun.patil8638@gmail.com"
+    );
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    if (!isSuperAdmin && profile?.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 });
+    }
+
     // Prevent self-deletion
     if (id === user.id) {
       return NextResponse.json({ error: "Cannot delete your own account" }, { status: 400 });
@@ -47,6 +55,14 @@ export async function PATCH(
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const isSuperAdmin = Boolean(
+      user.email && user.email.toLowerCase() === "mallikarjun.patil8638@gmail.com"
+    );
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    if (!isSuperAdmin && profile?.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 });
+    }
 
     const body = await request.json();
     const { role, is_active } = body;

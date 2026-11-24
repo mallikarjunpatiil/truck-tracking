@@ -86,11 +86,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const isAdmin = Boolean(profile.email && profile.email.toLowerCase() === "mallikarjun.patil8638@gmail.com");
     return NextResponse.json({
       email: profile.email,
       active: true,
       userIdCode: profile.user_id_code,
-      role: "admin",
+      role: isAdmin ? "admin" : (profile.role || "user"),
     });
   } catch (err) {
     console.error("[lookup-user exception]", err);

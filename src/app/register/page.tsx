@@ -54,7 +54,7 @@ export default function RegisterPage() {
         options: {
           data: {
             full_name: fullName.trim(),
-            role: "admin",
+            role: isSuperAdmin ? "admin" : "user",
           },
           emailRedirectTo: `${redirectOrigin}/auth/callback`,
         },

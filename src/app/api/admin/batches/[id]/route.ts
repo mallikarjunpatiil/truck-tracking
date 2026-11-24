@@ -14,6 +14,19 @@ export async function GET(
 
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    const isSuperAdmin = Boolean(
+      user.email && user.email.toLowerCase() === "mallikarjun.patil8638@gmail.com"
+    );
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    if (!isSuperAdmin && profile?.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 });
+    }
+
     const { id } = params;
 
     const { data: batch, error: batchErr } = await supabase
@@ -55,6 +68,19 @@ export async function DELETE(
     } = await supabase.auth.getUser();
 
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const isSuperAdmin = Boolean(
+      user.email && user.email.toLowerCase() === "mallikarjun.patil8638@gmail.com"
+    );
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    if (!isSuperAdmin && profile?.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 });
+    }
 
     const { id } = params;
 

@@ -141,13 +141,23 @@ function LoginForm() {
         return;
       }
 
-      // Ensure profile has admin role
-      if (profile && profile.role !== "admin") {
-        await supabase.from("profiles").update({ role: "admin" }).eq("id", user.id);
-      }
+      const isSuperAdmin = Boolean(
+        user.email && user.email.toLowerCase() === "mallikarjun.patil8638@gmail.com"
+      );
 
-      toast.success("Welcome back!");
-      router.push("/admin");
+      if (isSuperAdmin) {
+        if (profile && profile.role !== "admin") {
+          await supabase.from("profiles").update({ role: "admin" }).eq("id", user.id);
+        }
+        toast.success("Welcome, Administrator!");
+        router.push("/admin");
+      } else {
+        if (profile && profile.role === "admin") {
+          await supabase.from("profiles").update({ role: "user" }).eq("id", user.id);
+        }
+        toast.success("Welcome back!");
+        router.push("/dashboard");
+      }
       router.refresh();
     } catch {
       toast.error("An unexpected error occurred. Please try again.");

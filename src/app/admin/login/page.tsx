@@ -87,14 +87,25 @@ function AdminLoginForm() {
 
       const user = data.user;
 
-      // 3. Ensure profile exists and has admin role
+      // 3. Admin authorization check: only mallikarjun.patil8638@gmail.com or authorized admin
+      const isSuperAdmin = Boolean(
+        user.email && user.email.toLowerCase() === "mallikarjun.patil8638@gmail.com"
+      );
+
       const { data: profile } = await supabase
         .from("profiles")
         .select("role, is_active")
         .eq("id", user.id)
         .single();
 
-      if (profile && profile.role !== "admin") {
+      if (!isSuperAdmin && profile?.role !== "admin") {
+        await supabase.auth.signOut();
+        toast.error("Access Denied: Administrator access is reserved for mallikarjun.patil8638@gmail.com. Please use normal User Login.");
+        setLoading(false);
+        return;
+      }
+
+      if (isSuperAdmin && profile && profile.role !== "admin") {
         await supabase.from("profiles").update({ role: "admin" }).eq("id", user.id);
       }
 

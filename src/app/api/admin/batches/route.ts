@@ -13,6 +13,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const isSuperAdmin = Boolean(
+      user.email && user.email.toLowerCase() === "mallikarjun.patil8638@gmail.com"
+    );
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    if (!isSuperAdmin && profile?.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 });
+    }
+
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get("limit") || "30", 10);
     const offset = parseInt(searchParams.get("offset") || "0", 10);

@@ -10,6 +10,11 @@ export const ADMIN_EMAILS = [
   "mallikarjun.patil8638@gmail.com",
 ];
 
+export function isSuperAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return email.trim().toLowerCase() === "mallikarjun.patil8638@gmail.com";
+}
+
 export const VEHICLE_COLUMNS = [
   { key: "customer_name", label: "Customer Name", required: true },
   { key: "agreement_number", label: "Agreement Number" },

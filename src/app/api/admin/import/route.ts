@@ -13,12 +13,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // All authenticated users have admin access
+    // Admin verification: only mallikarjun.patil8638@gmail.com or active admin
+    const isSuperAdmin = Boolean(
+      user.email && user.email.toLowerCase() === "mallikarjun.patil8638@gmail.com"
+    );
     const { data: profile } = await supabase
       .from("profiles")
       .select("role, full_name")
       .eq("id", user.id)
       .maybeSingle();
+
+    if (!isSuperAdmin && profile?.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 });
+    }
 
     let fileName = "uploaded-file.xlsx";
     let filePath: string | null = null;

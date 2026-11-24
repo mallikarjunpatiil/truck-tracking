@@ -12,6 +12,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const isSuperAdmin = Boolean(
+      user.email && user.email.toLowerCase() === "mallikarjun.patil8638@gmail.com"
+    );
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    if (!isSuperAdmin && profile?.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden: Admin access required" }, { status: 403 });
+    }
+
     const body = await request.json();
     const result = createUserSchema.safeParse(body);
     if (!result.success) {
@@ -70,8 +83,11 @@ export async function GET() {
 
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    const isSuperAdmin = Boolean(
+      user.email && user.email.toLowerCase() === "mallikarjun.patil8638@gmail.com"
+    );
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-    if (!profile || profile.role !== "admin") {
+    if (!isSuperAdmin && profile?.role !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
