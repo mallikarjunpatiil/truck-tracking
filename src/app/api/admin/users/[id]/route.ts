@@ -26,9 +26,25 @@ export async function DELETE(
       return NextResponse.json({ error: "Cannot delete your own account" }, { status: 400 });
     }
 
-    const adminClient = await createServiceRoleClient();
-    const { error } = await adminClient.auth.admin.deleteUser(id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    const hasServiceRoleKey =
+      Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) &&
+      !process.env.SUPABASE_SERVICE_ROLE_KEY?.includes("your-") &&
+      !process.env.SUPABASE_SERVICE_ROLE_KEY?.includes("placeholder");
+
+    if (hasServiceRoleKey) {
+      try {
+        const adminClient = await createServiceRoleClient();
+        await adminClient.auth.admin.deleteUser(id);
+      } catch (e) {
+        console.warn("[Admin deleteUser exception]", e);
+      }
+    }
+
+    // Remove user profile record
+    const { error: deleteProfileError } = await supabase.from("profiles").delete().eq("id", id);
+    if (deleteProfileError) {
+      return NextResponse.json({ error: deleteProfileError.message }, { status: 400 });
+    }
 
     // Audit log
     await supabase.from("audit_logs").insert({

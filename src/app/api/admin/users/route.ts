@@ -33,42 +33,99 @@ export async function POST(request: NextRequest) {
 
     const { email, password, full_name, role, user_id_code, phone_number } = result.data;
 
-    // Use service role client to create user (never exposed to frontend)
-    const adminClient = await createServiceRoleClient();
-    const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name, role, phone_number },
-    });
+    let createdUserId: string | null = null;
+    let createErrorMsg: string | null = null;
 
-    if (createError) {
-      return NextResponse.json({ error: createError.message }, { status: 400 });
+    // 1. Try service role admin client first if service role key is configured
+    const hasServiceRoleKey =
+      Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY) &&
+      !process.env.SUPABASE_SERVICE_ROLE_KEY?.includes("your-") &&
+      !process.env.SUPABASE_SERVICE_ROLE_KEY?.includes("placeholder");
+
+    if (hasServiceRoleKey) {
+      try {
+        const adminClient = await createServiceRoleClient();
+        const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: { full_name, role, phone_number, user_id_code },
+        });
+
+        if (!createError && newUser?.user) {
+          createdUserId = newUser.user.id;
+        } else if (createError) {
+          createErrorMsg = createError.message;
+        }
+      } catch (err: unknown) {
+        createErrorMsg = err instanceof Error ? err.message : "Service role admin creation failed";
+      }
     }
 
-    // Insert or update profile
+    // 2. Fallback to signUp if service role key is not configured or failed with Bearer token error
+    if (!createdUserId) {
+      const { createClient } = await import("@supabase/supabase-js");
+      const anonClient = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || "https://cbawyuzqhxfqoyjhwpnc.supabase.co",
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_qy_8m0bDYR9Kg9Gl_ZA99Q_AStcBwUO",
+        {
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+          },
+        }
+      );
+
+      const { data: signUpData, error: signUpError } = await anonClient.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name,
+            role,
+            phone_number,
+            user_id_code,
+          },
+        },
+      });
+
+      if (signUpError) {
+        return NextResponse.json({ error: signUpError.message }, { status: 400 });
+      }
+
+      if (signUpData?.user) {
+        createdUserId = signUpData.user.id;
+      } else {
+        return NextResponse.json(
+          { error: createErrorMsg || "User registration could not be completed" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 3. Upsert profile in public.profiles table using current admin session
     const profilePayload: Record<string, unknown> = {
-      id: newUser.user.id,
+      id: createdUserId,
       email,
       full_name,
-      role,
+      role: role || "user",
       is_active: true,
     };
     if (user_id_code) profilePayload.user_id_code = user_id_code;
     if (phone_number) profilePayload.phone_number = phone_number;
 
-    await adminClient.from("profiles").upsert(profilePayload);
+    await supabase.from("profiles").upsert(profilePayload);
 
     // Audit log
     await supabase.from("audit_logs").insert({
       user_id: user.id,
       action: "user_created",
       resource_type: "user",
-      resource_id: newUser.user.id,
-      details: { email, role },
+      resource_id: createdUserId,
+      details: { email, role, full_name },
     });
 
-    return NextResponse.json({ success: true, userId: newUser.user.id });
+    return NextResponse.json({ success: true, userId: createdUserId });
   } catch (error) {
     console.error("Create user error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

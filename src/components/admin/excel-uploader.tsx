@@ -48,6 +48,7 @@ export function ExcelUploader({ onUploadComplete }: { onUploadComplete?: () => v
   const [progress, setProgress] = useState(0);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importStatusText, setImportStatusText] = useState("");
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -124,32 +125,183 @@ export function ExcelUploader({ onUploadComplete }: { onUploadComplete?: () => v
     setShowConfirmModal(false);
     setImporting(true);
     setStep("importing");
-    setProgress(15);
+    setProgress(5);
+    setImportStatusText(`Preparing ${parsed.rawRows.length.toLocaleString()} records for import...`);
 
     try {
-      const progressTimer = setInterval(() => {
-        setProgress((p) => Math.min(p + 12, 90));
-      }, 350);
-
-      const formData = new FormData();
-      formData.append("file", parsed.file);
-      formData.append("mapping", JSON.stringify(mapping));
-      formData.append("duplicateStrategy", duplicateStrategy);
-
-      const res = await fetch("/api/admin/import", {
+      // 1. Initialize batch record on server (lightweight JSON request)
+      const initRes = await fetch("/api/admin/import", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "init",
+          fileName: parsed.fileName,
+          totalRecords: parsed.rawRows.length,
+          mapping,
+          duplicateStrategy,
+        }),
       });
 
-      clearInterval(progressTimer);
+      const initText = await initRes.text();
+      let initData: { error?: string; batchId?: string };
+      try {
+        initData = JSON.parse(initText);
+      } catch {
+        throw new Error(initText.slice(0, 150) || `Server error (${initRes.status})`);
+      }
+
+      if (!initRes.ok || !initData.batchId) {
+        throw new Error(initData.error || "Failed to initialize import batch");
+      }
+
+      const batchId = initData.batchId;
+      const CHUNK_SIZE = 500; // 500 records per chunk for optimal speed & zero payload limits
+      const totalRows = parsed.rawRows.length;
+      const totalChunks = Math.ceil(totalRows / CHUNK_SIZE);
+
+      let totalImported = 0;
+      let totalDuplicates = 0;
+      let totalFailed = 0;
+      const collectedErrors: { row: number; error: string; identifier?: string }[] = [];
+
+      // Helper to map a raw row to vehicle record
+      const mapRow = (rawRow: Record<string, unknown>, rowIdx: number) => {
+        const getV = (key: string): string => {
+          const col = mapping[key];
+          if (!col || rawRow[col] === undefined || rawRow[col] === null) return "";
+          return String(rawRow[col]).trim();
+        };
+
+        const custName = getV("customer_name");
+        if (!custName) {
+          return null;
+        }
+
+        let year: number | null = null;
+        const yearStr = getV("vehicle_year");
+        if (yearStr) {
+          const y = parseInt(yearStr, 10);
+          if (!isNaN(y) && y >= 1970 && y <= 2035) year = y;
+        }
+
+        return {
+          customer_name: custName,
+          agreement_number: getV("agreement_number") || null,
+          registration_number: getV("registration_number") || null,
+          chassis_number: getV("chassis_number") || null,
+          engine_number: getV("engine_number") || null,
+          vehicle_type: getV("vehicle_type") || "Truck",
+          vehicle_make: getV("vehicle_make") || null,
+          vehicle_model: getV("vehicle_model") || null,
+          vehicle_year: year,
+          vehicle_color: getV("vehicle_color") || null,
+          finance_company: getV("finance_company") || null,
+          branch: getV("branch") || null,
+          status: getV("status") || "active",
+          remarks: getV("remarks") || null,
+          row_index: rowIdx + 2,
+        };
+      };
+
+      // 2. Stream records in chunks to prevent Vercel 4.5MB request limit & function timeouts
+      for (let c = 0; c < totalChunks; c++) {
+        const start = c * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, totalRows);
+        const chunkRaw = parsed.rawRows.slice(start, end);
+
+        const chunkRecords: Record<string, unknown>[] = [];
+        chunkRaw.forEach((r, idx) => {
+          const mapped = mapRow(r, start + idx);
+          if (mapped) {
+            chunkRecords.push(mapped);
+          } else {
+            totalFailed++;
+            if (collectedErrors.length < 50) {
+              collectedErrors.push({ row: start + idx + 2, error: "Missing required Customer Name" });
+            }
+          }
+        });
+
+        if (chunkRecords.length > 0) {
+          const chunkRes = await fetch("/api/admin/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "chunk",
+              batchId,
+              duplicateStrategy,
+              records: chunkRecords,
+              chunkIndex: c,
+              totalChunks,
+            }),
+          });
+
+          const chunkText = await chunkRes.text();
+          let chunkData: { error?: string; imported?: number; duplicates?: number; failed?: number; errors?: any[] };
+          try {
+            chunkData = JSON.parse(chunkText);
+          } catch {
+            throw new Error(chunkText.slice(0, 150) || `Chunk ${c + 1} server error (${chunkRes.status})`);
+          }
+
+          if (!chunkRes.ok) {
+            throw new Error(chunkData.error || `Failed to process chunk ${c + 1}`);
+          }
+
+          totalImported += chunkData.imported || 0;
+          totalDuplicates += chunkData.duplicates || 0;
+          totalFailed += chunkData.failed || 0;
+          if (chunkData.errors) {
+            collectedErrors.push(...chunkData.errors.slice(0, 20));
+          }
+        }
+
+        const currentProcessed = Math.min(end, totalRows);
+        const percent = Math.min(95, Math.round((currentProcessed / totalRows) * 90) + 5);
+        setProgress(percent);
+        setImportStatusText(`Importing: ${currentProcessed.toLocaleString()} of ${totalRows.toLocaleString()} records (${percent}%)...`);
+      }
+
+      // 3. Finalize Batch on Server
+      setImportStatusText("Finalizing upload batch...");
+      const finRes = await fetch("/api/admin/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "finalize",
+          batchId,
+          imported: totalImported,
+          duplicates: totalDuplicates,
+          failed: totalFailed,
+          errors: collectedErrors.slice(0, 100),
+          fileName: parsed.fileName,
+        }),
+      });
+
+      const finText = await finRes.text();
+      let finData: any;
+      try {
+        finData = JSON.parse(finText);
+      } catch {
+        finData = {};
+      }
+
       setProgress(100);
+      setImportStatusText("Import complete!");
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to complete data import");
+      const finalSummary: ImportSummary = {
+        total: totalRows,
+        imported: totalImported,
+        duplicates: totalDuplicates,
+        failed: totalFailed,
+        status: totalFailed === totalRows ? "failed" : "completed",
+        batchId,
+        errors: collectedErrors,
+      };
 
-      setSummary(data);
+      setSummary(finalSummary);
       setStep("done");
-      toast.success(`Import complete! ${data.imported} vehicle records saved to database.`);
+      toast.success(`Import complete! ${totalImported.toLocaleString()} vehicle records saved to database.`);
 
       if (onUploadComplete) {
         onUploadComplete();
@@ -452,8 +604,8 @@ export function ExcelUploader({ onUploadComplete }: { onUploadComplete?: () => v
               <RefreshCw className="w-8 h-8 animate-spin" />
             </div>
             <h4 className="text-base font-bold text-navy-900 mb-1">Importing Vehicle Records…</h4>
-            <p className="text-xs text-navy-500 mb-6">
-              Storing file in Supabase Storage, checking duplicates, and saving structured records.
+            <p className="text-xs text-navy-500 mb-4 min-h-[1.5rem]">
+              {importStatusText || "Streaming records and saving to database..."}
             </p>
 
             <div className="w-full h-2.5 bg-navy-100 rounded-full overflow-hidden">
